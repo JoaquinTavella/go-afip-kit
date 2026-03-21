@@ -88,3 +88,69 @@ func TestCall_ContextCanceled(t *testing.T) {
 		t.Fatal("expected error from canceled context, got nil")
 	}
 }
+
+func TestCall_SOAPFault(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/xml")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Body>
+    <soap:Fault>
+      <faultcode>soap:Server</faultcode>
+      <faultstring>El servicio no esta disponible</faultstring>
+      <detail>WSAA offline</detail>
+    </soap:Fault>
+  </soap:Body>
+</soap:Envelope>`))
+	}))
+	defer server.Close()
+
+	client := NewClient()
+	req := testRequest{Value: "test"}
+	var resp testResponse
+
+	err := client.Call(context.Background(), server.URL, "", &req, &resp)
+	if err == nil {
+		t.Fatal("expected error for SOAP fault")
+	}
+
+	fault, ok := err.(*Fault)
+	if !ok {
+		t.Fatalf("expected *Fault, got %T: %v", err, err)
+	}
+	if fault.Code != "soap:Server" {
+		t.Errorf("expected fault code soap:Server, got %s", fault.Code)
+	}
+}
+
+func TestCall_SOAPFaultInHTTPError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/xml")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Body>
+    <soap:Fault>
+      <faultcode>soap:Client</faultcode>
+      <faultstring>Invalid request</faultstring>
+    </soap:Fault>
+  </soap:Body>
+</soap:Envelope>`))
+	}))
+	defer server.Close()
+
+	client := NewClient()
+	req := testRequest{Value: "test"}
+	var resp testResponse
+
+	err := client.Call(context.Background(), server.URL, "", &req, &resp)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	_, ok := err.(*Fault)
+	if !ok {
+		t.Fatalf("expected *Fault from HTTP 500 with SOAP fault body, got %T", err)
+	}
+}
