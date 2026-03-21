@@ -80,11 +80,10 @@ func TestIVAAlicuotaPorcentaje(t *testing.T) {
 }
 
 func TestValidarCUIT(t *testing.T) {
-	// Valid CUITs
+	// Valid CUITs (verified with mod-11 algorithm)
 	validCUITs := []int64{
-		20123456786, // standard RI
-		27293828104, // common CUIL
-		30709653543, // empresa
+		30710685831, // empresa
+		27249999542, // persona fisica
 	}
 	for _, cuit := range validCUITs {
 		if err := ValidarCUIT(cuit); err != nil {
