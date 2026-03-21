@@ -1,0 +1,404 @@
+# go-afip-kit
+
+Go client library for Argentina's **AFIP (ARCA)** electronic invoicing web services.
+
+Covers the full invoicing lifecycle: certificate management, WSAA authentication, WSFEv1 electronic invoicing, and Argentine fiscal rules — all in a standalone library with no framework or database dependencies.
+
+```bash
+go get github.com/lukcba-developers/go-afip-kit@v0.1.0
+```
+
+## Features
+
+- **WSAA Authentication** — CMS/PKCS#7 signed login with automatic token caching and renewal
+- **WSFEv1 Electronic Invoicing** — Emit invoices (Facturas A/B/C), credit notes, debit notes, and obtain CAE codes
+- **Idempotent Retries** — Built-in handling of error 10016 (already registered) with automatic CAE recovery
+- **Certificate Management** — PEM parsing (PKCS#1/PKCS#8), validation, expiry checks, CUIT extraction, and AES-256-GCM encryption at rest
+- **Fiscal Rules** — Automatic comprobante type determination (A/B/C), amount validation with integer centavo arithmetic, IVA calculation, CUIT validation
+- **Homologacion & Production** — Single `production bool` flag switches between sandbox and live environments
+
+## Packages
+
+| Package | Description |
+|---------|-------------|
+| `afipkit` (root) | Constants (comprobante types, IVA codes, currencies, documents) and shared error types |
+| `soap/` | Minimal SOAP 1.1 client — envelope wrapping, fault detection, no WSDL |
+| `wsaa/` | WSAA authentication — `Client`, `CachedClient`, `TokenStore` interface |
+| `wsfev1/` | WSFEv1 invoicing — `SolicitarCAE`, `ConsultarComprobante`, parameter queries |
+| `cert/` | Certificate parsing, validation, and `KeyVault` for encrypted private key storage |
+| `fiscal/` | Argentine fiscal rules — comprobante determination, amount validation, IVA calculation |
+
+## Quick Start
+
+### Emit an Invoice
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+    "os"
+    "time"
+
+    afipkit "github.com/lukcba-developers/go-afip-kit"
+    "github.com/lukcba-developers/go-afip-kit/cert"
+    "github.com/lukcba-developers/go-afip-kit/fiscal"
+    "github.com/lukcba-developers/go-afip-kit/wsaa"
+    "github.com/lukcba-developers/go-afip-kit/wsfev1"
+)
+
+func main() {
+    ctx := context.Background()
+    production := false // homologacion
+
+    // 1. Load and validate certificate
+    certPEM, _ := os.ReadFile("mi_certificado.crt")
+    keyPEM, _ := os.ReadFile("mi_clave.key")
+
+    result, err := cert.Validate(certPEM, keyPEM, "20123456789")
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Printf("Certificate valid, expires in %d days\n", result.DaysUntilExpiry)
+
+    // 2. Parse cert + key
+    x509Cert, rsaKey, err := cert.ParseCertAndKey(certPEM, keyPEM)
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // 3. Authenticate with WSAA (cached)
+    wsaaClient := wsaa.NewClient()
+    cachedAuth := wsaa.NewCachedClient(wsaaClient, wsaa.NewMemoryStore())
+
+    token, err := cachedAuth.Authenticate(ctx, x509Cert, rsaKey,
+        20123456789, "wsfe", production)
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // 4. Create WSFEv1 client and check AFIP health
+    wsfe := wsfev1.NewClient(production)
+
+    health, err := wsfe.HealthCheck(ctx)
+    if err != nil {
+        log.Fatal(err)
+    }
+    if !health.IsOK() {
+        log.Fatalf("AFIP unavailable: %+v", health)
+    }
+
+    // 5. Get last authorized comprobante number
+    cuit := int64(20123456789)
+    ptoVta := 1
+    tipoCbte := afipkit.CbteFacturaB
+
+    ultimo, err := wsfe.UltimoAutorizado(ctx, token, cuit, ptoVta, tipoCbte)
+    if err != nil {
+        log.Fatal(err)
+    }
+    siguiente := ultimo + 1
+
+    // 6. Build and submit the invoice
+    solicitud := &wsfev1.FECAESolicitarRequest{
+        FeCAEReq: wsfev1.FeCAEReq{
+            FeCabReq: wsfev1.FeCabReq{
+                CantReg:  1,
+                PtoVta:   ptoVta,
+                CbteTipo: tipoCbte,
+            },
+            FeDetReq: []wsfev1.FECAEDetRequest{{
+                Concepto:     afipkit.ConceptoServicios,
+                DocTipo:      afipkit.DocCUIT,
+                DocNro:       30123456789,
+                CbteDesde:    siguiente,
+                CbteHasta:    siguiente,
+                CbteFch:      fiscal.FormatFechaAFIP(time.Now()),
+                ImpTotal:     "121000.00",
+                ImpTotConc:   "0",
+                ImpNeto:      "100000.00",
+                ImpOpEx:      "0",
+                ImpIVA:       "21000.00",
+                ImpTrib:      "0",
+                FchServDesde: "20260301",
+                FchServHasta: "20260331",
+                FchVtoPago:   "20260418",
+                MonId:        afipkit.MonedaPesos,
+                MonCotiz:     "1",
+                Iva: &wsfev1.IvaArray{
+                    AlicIva: []wsfev1.AlicIvaItem{{
+                        Id:      afipkit.IVA21,
+                        BaseImp: "100000.00",
+                        Importe: "21000.00",
+                    }},
+                },
+            }},
+        },
+    }
+
+    // SolicitarCAEConReproceso handles error 10016 automatically
+    caeResult, err := wsfe.SolicitarCAEConReproceso(ctx, token, cuit, solicitud)
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    fmt.Printf("CAE: %s (expires: %s)\n", caeResult.CAE, caeResult.CAEFchVto)
+    if caeResult.Reproceso {
+        fmt.Println("(recovered via reprocessing)")
+    }
+}
+```
+
+## Fiscal Rules
+
+```go
+// Determine comprobante type from IVA conditions
+tipoCbte, _ := fiscal.DeterminarTipoComprobante(
+    fiscal.ResponsableInscripto, // emisor (seller)
+    fiscal.ResponsableInscripto, // receptor (buyer)
+)
+// tipoCbte == afipkit.CbteFacturaA (1)
+
+// RI -> RI                        = Factura A
+// RI -> CF/Mono/Exento/NoResp     = Factura B
+// Mono/Exento -> any              = Factura C
+```
+
+### Amount Validation
+
+```go
+// Validate that ImpTotal == sum of all parts (uses integer centavo math)
+err := fiscal.ValidarCuadratura(fiscal.Importes{
+    ImpNeto:  100000.00,
+    ImpIVA:   21000.00,
+    ImpTotal: 121000.00,
+})
+
+// Calculate IVA from base amount
+iva, _ := fiscal.CalcularIVA(100000.00, afipkit.IVA21)
+// iva == 21000.00
+
+// Validate IVA breakdown matches totals
+err = fiscal.ValidarAlicuotasIVA(
+    []fiscal.AlicuotaIVA{{ID: afipkit.IVA21, BaseImp: 100000, Importe: 21000}},
+    100000.00, // impNeto
+    21000.00,  // impIVA
+)
+```
+
+### Dates
+
+```go
+fecha := fiscal.FormatFechaAFIP(time.Now())     // "20260321"
+parsed, _ := fiscal.ParseFechaAFIP("20260321")  // time.Time
+err := fiscal.ValidarFechaAFIP("20260321")       // nil (valid)
+```
+
+## Credit Notes
+
+```go
+// Get credit note type for an invoice type
+tipoNC, _ := fiscal.DeterminarTipoNC(afipkit.CbteFacturaA)
+// tipoNC == afipkit.CbteNotaCreditoA (3)
+
+// Reference the original comprobante
+solicitud := &wsfev1.FECAESolicitarRequest{
+    FeCAEReq: wsfev1.FeCAEReq{
+        FeCabReq: wsfev1.FeCabReq{CantReg: 1, PtoVta: 1, CbteTipo: tipoNC},
+        FeDetReq: []wsfev1.FECAEDetRequest{{
+            // ... same fields as invoice ...
+            CbtesAsoc: &wsfev1.CbtesAsocArray{
+                CbteAsoc: []wsfev1.CbteAsocItem{{
+                    Tipo:    afipkit.CbteFacturaA,
+                    PtoVta:  1,
+                    Nro:     42,
+                    Cuit:    20123456789,
+                    CbteFch: "20260318",
+                }},
+            },
+        }},
+    },
+}
+```
+
+## Certificate Management
+
+### Parsing & Validation
+
+```go
+// Parse certificate and private key from PEM
+x509Cert, rsaKey, err := cert.ParseCertAndKey(certPEM, keyPEM)
+
+// Full validation: expiry, CUIT match, key pairing
+result, err := cert.Validate(certPEM, keyPEM, "20123456789")
+fmt.Printf("Expires: %s (%d days)\n", result.NotAfter, result.DaysUntilExpiry)
+fmt.Printf("Fingerprint: %s\n", result.Fingerprint)
+
+// Certificate-only validation (no private key needed)
+result, err := cert.ValidateCertOnly(certPEM, "20123456789")
+```
+
+### Encrypt Private Keys at Rest
+
+```go
+// Create vault with 32-byte master key (64 hex chars)
+vault, err := cert.NewKeyVault(os.Getenv("AFIP_MASTER_KEY"))
+
+// Encrypt for database storage
+encrypted, _ := vault.EncryptToBase64(keyPEM)
+
+// Decrypt when needed
+decrypted, _ := vault.DecryptFromBase64(encrypted)
+```
+
+## Token Caching
+
+The library includes `MemoryStore` for single-instance deployments. For multi-instance services, implement the `TokenStore` interface:
+
+```go
+type TokenStore interface {
+    Get(ctx context.Context, key string) (*wsaa.TokenAcceso, error)
+    Set(ctx context.Context, key string, token *wsaa.TokenAcceso) error
+    Delete(ctx context.Context, key string) error
+}
+```
+
+### Redis Example
+
+```go
+type RedisTokenStore struct {
+    client *redis.Client
+}
+
+func (r *RedisTokenStore) Get(ctx context.Context, key string) (*wsaa.TokenAcceso, error) {
+    data, err := r.client.Get(ctx, key).Bytes()
+    if err == redis.Nil {
+        return nil, nil // not found
+    }
+    if err != nil {
+        return nil, err
+    }
+    var token wsaa.TokenAcceso
+    _ = json.Unmarshal(data, &token)
+    return &token, nil
+}
+
+func (r *RedisTokenStore) Set(ctx context.Context, key string, token *wsaa.TokenAcceso) error {
+    data, _ := json.Marshal(token)
+    ttl := time.Until(token.Expiration) - 30*time.Minute
+    return r.client.Set(ctx, key, data, ttl).Err()
+}
+
+func (r *RedisTokenStore) Delete(ctx context.Context, key string) error {
+    return r.client.Del(ctx, key).Err()
+}
+
+// Usage
+store := &RedisTokenStore{client: redisClient}
+cached := wsaa.NewCachedClient(wsaaClient, store)
+```
+
+## Error Handling
+
+AFIP errors are typed and inspectable:
+
+```go
+caeResult, err := wsfe.SolicitarCAE(ctx, token, cuit, solicitud)
+if err != nil {
+    if afipErr, ok := afipkit.IsAFIPError(err); ok {
+        // AFIP business error
+        fmt.Println("Code:", afipErr.FirstCode())
+
+        if afipErr.IsAlreadyRegistered() {
+            // Error 10016: comprobante already authorized
+            // Recover CAE with ConsultarComprobante
+        }
+        if afipErr.IsInvalidPtoVta() {
+            // Error 10005: punto de venta not configured
+        }
+        if afipErr.IsAmountMismatch() {
+            // Error 10048: ImpTotal != sum of parts
+        }
+    }
+
+    // Infrastructure errors
+    var soapErr *afipkit.ErrSOAP
+    if errors.As(err, &soapErr) {
+        // Network/timeout/malformed XML
+    }
+
+    var authErr *afipkit.ErrWSAAAuth
+    if errors.As(err, &authErr) {
+        // Authentication failed
+    }
+}
+```
+
+## Constants Reference
+
+### Comprobante Types
+
+| Constant | Code | Description |
+|----------|------|-------------|
+| `CbteFacturaA` | 1 | Factura A |
+| `CbteNotaDebitoA` | 2 | Nota de Debito A |
+| `CbteNotaCreditoA` | 3 | Nota de Credito A |
+| `CbteFacturaB` | 6 | Factura B |
+| `CbteNotaCreditoB` | 8 | Nota de Credito B |
+| `CbteFacturaC` | 11 | Factura C |
+| `CbteFacturaE` | 19 | Factura E (Exportacion) |
+| `CbteFCEFacturaA` | 201 | FCE MiPyME Factura A |
+
+### IVA Rates
+
+| Constant | Code | Rate |
+|----------|------|------|
+| `IVANoGravado` | 1 | No gravado |
+| `IVAExento` | 2 | Exento |
+| `IVA0` | 3 | 0% |
+| `IVA25` | 9 | 2.5% |
+| `IVA5` | 8 | 5% |
+| `IVA105` | 4 | 10.5% |
+| `IVA21` | 5 | 21% |
+| `IVA27` | 6 | 27% |
+
+### Document Types
+
+| Constant | Code | Description |
+|----------|------|-------------|
+| `DocCUIT` | 80 | CUIT |
+| `DocCUIL` | 86 | CUIL |
+| `DocDNI` | 96 | DNI |
+| `DocSinIdentificar` | 99 | Sin identificar |
+
+### Currencies
+
+| Constant | Code |
+|----------|------|
+| `MonedaPesos` | PES |
+| `MonedaDolar` | DOL |
+| `MonedaEuro` | 060 |
+
+## WSFEv1 Parameter Queries
+
+```go
+tipos, _ := wsfe.TiposComprobante(ctx, token, cuit)
+ivas, _ := wsfe.AlicuotasIVA(ctx, token, cuit)
+ptos, _ := wsfe.PuntosVenta(ctx, token, cuit)
+docs, _ := wsfe.TiposDocumento(ctx, token, cuit)
+monedas, _ := wsfe.TiposMonedas(ctx, token, cuit)
+cotiz, _ := wsfe.Cotizacion(ctx, token, cuit, afipkit.MonedaDolar)
+maxReg, _ := wsfe.MaxComprobantesPerRequest(ctx, token, cuit)
+```
+
+## Requirements
+
+- Go 1.24+
+- AFIP certificate (.crt) and private key (.key) for the CUIT to operate
+- Punto de venta configured in AFIP for electronic invoicing
+
+## License
+
+MIT
