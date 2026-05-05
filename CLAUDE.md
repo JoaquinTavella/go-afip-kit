@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-Go library for Argentina's AFIP (ARCA) electronic invoicing web services. Covers WSAA authentication, WSFEv1 invoicing, certificate management, and fiscal rules. Pure library — no framework, no database, no CLI.
+Go library for Argentina's AFIP (ARCA) electronic invoicing web services. Covers WSAA authentication, WSFEv1 invoicing, WS-SR-PADRON taxpayer lookup, certificate management, and fiscal rules. Pure library — no framework, no database, no CLI.
 
 ## Commands
 
@@ -16,6 +16,7 @@ go test ./...
 go test ./soap/
 go test ./wsaa/
 go test ./wsfev1/
+go test ./wspadron/
 go test ./fiscal/
 go test ./cert/
 
@@ -41,11 +42,13 @@ The module is `github.com/lukcba-developers/go-afip-kit`. Only external dependen
 
 3. **`wsfev1/`** — WSFEv1 electronic invoicing client. `SolicitarCAE` emits comprobantes, `SolicitarCAEConReproceso` adds idempotent retry (handles error 10016 by recovering the CAE via `ConsultarComprobante`). Also exposes parameter queries (tipos de comprobante, IVA, monedas, puntos de venta, cotizacion).
 
-4. **`cert/`** — Certificate utilities: PEM parsing (PKCS#1 and PKCS#8), validation (expiry, CUIT extraction, TLS pairing), and `KeyVault` for AES-256-GCM encryption of private keys at rest.
+4. **`wspadron/`** — WS-SR-PADRON A5 taxpayer lookup client. `GetPersona` queries taxpayer registration data by CUIT (name, address, tax status, activities, monotributo category). `Persona` struct has helpers like `Denominacion()`, `ImpuestosActivos()`, `HasImpuesto()`. Uses same auth pattern as WSFEv1 (Token/Sign from WSAA).
 
-5. **`fiscal/`** — Argentine fiscal rules: `DeterminarTipoComprobante` (RI→RI=A, RI→CF=B, Mono/Exento→C), amount validation (`ValidarCuadratura` uses integer centavo arithmetic to avoid float issues), IVA calculation, AFIP date format helpers (YYYYMMDD).
+5. **`cert/`** — Certificate utilities: PEM parsing (PKCS#1 and PKCS#8), validation (expiry, CUIT extraction, TLS pairing), and `KeyVault` for AES-256-GCM encryption of private keys at rest.
 
-6. **Root package (`afipkit`)** — Constants (comprobante types, document types, IVA codes, currencies, environments) and shared error types (`AFIPError` with well-known codes like 10016, `ErrSOAP`, `ErrWSAAAuth`, `ErrCertificate`).
+6. **`fiscal/`** — Argentine fiscal rules: `DeterminarTipoComprobante` (RI→RI=A, RI→CF=B, Mono/Exento→C), amount validation (`ValidarCuadratura` uses integer centavo arithmetic to avoid float issues), IVA calculation, AFIP date format helpers (YYYYMMDD).
+
+7. **Root package (`afipkit`)** — Constants (comprobante types, document types, IVA codes, currencies, environments) and shared error types (`AFIPError` with well-known codes like 10016, `ErrSOAP`, `ErrWSAAAuth`, `ErrCertificate`).
 
 **Key patterns:**
 - All SOAP types use `encoding/xml` struct tags matching AFIP's WSDL exactly

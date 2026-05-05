@@ -12,6 +12,7 @@ go get github.com/lukcba-developers/go-afip-kit@v0.1.0
 
 - **WSAA Authentication** — CMS/PKCS#7 signed login with automatic token caching and renewal
 - **WSFEv1 Electronic Invoicing** — Emit invoices (Facturas A/B/C), credit notes, debit notes, and obtain CAE codes
+- **WS-SR-PADRON A5** — Query taxpayer registration data (Constancia de Inscripción): name, address, tax status, activities
 - **Idempotent Retries** — Built-in handling of error 10016 (already registered) with automatic CAE recovery
 - **Certificate Management** — PEM parsing (PKCS#1/PKCS#8), validation, expiry checks, CUIT extraction, and AES-256-GCM encryption at rest
 - **Fiscal Rules** — Automatic comprobante type determination (A/B/C), amount validation with integer centavo arithmetic, IVA calculation, CUIT validation
@@ -25,6 +26,7 @@ go get github.com/lukcba-developers/go-afip-kit@v0.1.0
 | `soap/` | Minimal SOAP 1.1 client — envelope wrapping, fault detection, no WSDL |
 | `wsaa/` | WSAA authentication — `Client`, `CachedClient`, `TokenStore` interface |
 | `wsfev1/` | WSFEv1 invoicing — `SolicitarCAE`, `ConsultarComprobante`, parameter queries |
+| `wspadron/` | WS-SR-PADRON A5 — `GetPersona` taxpayer data queries, health check |
 | `cert/` | Certificate parsing, validation, and `KeyVault` for encrypted private key storage |
 | `fiscal/` | Argentine fiscal rules — comprobante determination, amount validation, IVA calculation |
 
@@ -392,6 +394,62 @@ monedas, _ := wsfe.TiposMonedas(ctx, token, cuit)
 cotiz, _ := wsfe.Cotizacion(ctx, token, cuit, afipkit.MonedaDolar)
 maxReg, _ := wsfe.MaxComprobantesPerRequest(ctx, token, cuit)
 ```
+
+## WS-SR-PADRON A5 (Taxpayer Lookup)
+
+Query taxpayer registration data (Constancia de Inscripción) by CUIT:
+
+```go
+import "github.com/lukcba-developers/go-afip-kit/wspadron"
+
+// Create Padron client
+padron := wspadron.NewClient(production)
+
+// Check AFIP health
+health, err := padron.HealthCheck(ctx)
+if err != nil || !health.IsOK() {
+    log.Fatal("AFIP Padron unavailable")
+}
+
+// Query taxpayer data
+persona, err := padron.GetPersona(ctx, token, cuit, cuitToQuery)
+if err != nil {
+    log.Fatal(err)
+}
+
+fmt.Println("Name:", persona.Denominacion())
+fmt.Println("Type:", persona.TipoPersona)      // FISICA or JURIDICA
+fmt.Println("Status:", persona.EstadoClave)     // ACTIVO, ANULADO, etc.
+fmt.Println("Address:", persona.DomicilioFiscal.Direccion)
+fmt.Println("City:", persona.DomicilioFiscal.Localidad)
+fmt.Println("Province:", persona.DomicilioFiscal.Provincia)
+fmt.Println("ZIP:", persona.DomicilioFiscal.CodPostal)
+
+// Check tax registrations
+if persona.HasImpuesto(wspadron.ImpuestoIVA) {
+    fmt.Println("Registered for IVA")
+}
+if persona.HasImpuesto(wspadron.ImpuestoMonotributo) {
+    fmt.Println("Monotributo category:", persona.DatosMonotributo.CategoriaMonotributo.Descripcion)
+}
+
+// List all active taxes and activities
+fmt.Println("Active taxes:", persona.ImpuestosActivos())
+fmt.Println("Activities:", persona.Actividades())
+```
+
+### Common Tax IDs (Impuestos)
+
+| Constant | Code | Description |
+|----------|------|-------------|
+| `ImpuestoIVA` | 30 | IVA |
+| `ImpuestoGanancias` | 10 | Ganancias |
+| `ImpuestoExento` | 32 | Exento |
+| `ImpuestoNoInscripto` | 33 | No Inscripto |
+| `ImpuestoNoAlcanzado` | 34 | No Alcanzado |
+| `ImpuestoEmpleador` | 301 | Empleador |
+| `ImpuestoMonotributo` | 20 | Monotributo |
+| `ImpuestoMonotributoSocial` | 21 | Monotributo Social |
 
 ## Requirements
 
