@@ -20,7 +20,7 @@ const (
 	prodURL = "https://wsaa.afip.gov.ar/ws/services/LoginCms"
 
 	wsaaNamespace  = "http://wsaa.view.sua.dvadac.desein.afip.gov"
-	actionLoginCms = "urn:LoginCms"
+	actionLoginCms = `""`
 )
 
 // Client communicates with WSAA to obtain access tokens.

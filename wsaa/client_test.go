@@ -69,8 +69,8 @@ func TestAuthenticateSendsLoginCmsSOAPAction(t *testing.T) {
 	if _, err := client.Authenticate(context.Background(), cert, key, "wsfe", false); err != nil {
 		t.Fatalf("Authenticate returned error: %v", err)
 	}
-	if gotSOAPAction != "urn:LoginCms" {
-		t.Fatalf("expected SOAPAction urn:LoginCms, got %q", gotSOAPAction)
+	if gotSOAPAction != `""` {
+		t.Fatalf(`expected SOAPAction "", got %q`, gotSOAPAction)
 	}
 }
 
