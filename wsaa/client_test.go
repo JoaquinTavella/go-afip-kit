@@ -16,6 +16,16 @@ import (
 	"github.com/JoaquinTavella/go-afip-kit/soap"
 )
 
+func TestBuildLoginTicketRequestUsesUnsignedIntUniqueID(t *testing.T) {
+	now := time.Date(2026, 5, 6, 17, 45, 0, 0, time.FixedZone("ART", -3*60*60))
+
+	tra := buildLoginTicketRequest(now, "wsfe")
+
+	if tra.Header.UniqueID != 1778100300 {
+		t.Fatalf("expected Unix seconds uniqueId, got %d", tra.Header.UniqueID)
+	}
+}
+
 func TestParseLoginTicketResponseXML(t *testing.T) {
 	xmlStr := `<loginTicketResponse version="1.0">
   <header>

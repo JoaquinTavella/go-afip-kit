@@ -43,15 +43,7 @@ func NewClient(opts ...soap.Option) *Client {
 func (c *Client) Authenticate(ctx context.Context, cert *x509.Certificate, key *rsa.PrivateKey, service string, production bool) (*TokenAcceso, error) {
 	// 1. Generate TRA (Ticket de Requerimiento de Acceso)
 	now := time.Now()
-	tra := loginTicketRequest{
-		Version: "1.0",
-		Header: traHeader{
-			UniqueID:       now.UnixNano(),
-			GenerationTime: now.Add(-10 * time.Minute).Format(time.RFC3339),
-			ExpirationTime: now.Add(10 * time.Minute).Format(time.RFC3339),
-		},
-		Service: service,
-	}
+	tra := buildLoginTicketRequest(now, service)
 
 	traXML, err := xml.Marshal(tra)
 	if err != nil {
@@ -91,6 +83,18 @@ func (c *Client) Authenticate(ctx context.Context, cert *x509.Certificate, key *
 	}
 
 	return token, nil
+}
+
+func buildLoginTicketRequest(now time.Time, service string) loginTicketRequest {
+	return loginTicketRequest{
+		Version: "1.0",
+		Header: traHeader{
+			UniqueID:       now.Unix(),
+			GenerationTime: now.Add(-10 * time.Minute).Format(time.RFC3339),
+			ExpirationTime: now.Add(10 * time.Minute).Format(time.RFC3339),
+		},
+		Service: service,
+	}
 }
 
 // parseLoginTicketResponseXML parses the XML string returned inside loginCmsReturn.
