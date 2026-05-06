@@ -19,7 +19,8 @@ const (
 	homoURL = "https://wsaahomo.afip.gov.ar/ws/services/LoginCms"
 	prodURL = "https://wsaa.afip.gov.ar/ws/services/LoginCms"
 
-	wsaaNamespace = "http://wsaa.view.sua.dvadac.desein.afip.gov"
+	wsaaNamespace  = "http://wsaa.view.sua.dvadac.desein.afip.gov"
+	actionLoginCms = "urn:LoginCms"
 )
 
 // Client communicates with WSAA to obtain access tokens.
@@ -79,7 +80,7 @@ func (c *Client) Authenticate(ctx context.Context, cert *x509.Certificate, key *
 	}
 
 	var resp loginCmsResponse
-	if err := c.soap.Call(ctx, url, "", &req, &resp); err != nil {
+	if err := c.soap.Call(ctx, url, actionLoginCms, &req, &resp); err != nil {
 		return nil, &afipkit.ErrWSAAAuth{Err: fmt.Errorf("LoginCms: %w", err)}
 	}
 

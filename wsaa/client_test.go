@@ -2,8 +2,18 @@ package wsaa
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"io"
+	"math/big"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/JoaquinTavella/go-afip-kit/soap"
 )
 
 func TestParseLoginTicketResponseXML(t *testing.T) {
@@ -38,6 +48,62 @@ func TestParseLoginTicketResponseXML(t *testing.T) {
 	if !token.Expiration.Equal(expected) {
 		t.Errorf("expected expiration %v, got %v", expected, token.Expiration)
 	}
+}
+
+func TestAuthenticateSendsLoginCmsSOAPAction(t *testing.T) {
+	cert, key := generateTestCertificate(t)
+	var gotSOAPAction string
+	client := NewClient(soap.WithHTTPClient(&http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			gotSOAPAction = req.Header.Get("SOAPAction")
+			body := `<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"><soapenv:Body><loginCmsResponse><loginCmsReturn>&lt;loginTicketResponse version=&#34;1.0&#34;&gt;&lt;header&gt;&lt;source&gt;CN=wsaahomo&lt;/source&gt;&lt;destination&gt;SERIALNUMBER=CUIT 20123456789&lt;/destination&gt;&lt;uniqueId&gt;1&lt;/uniqueId&gt;&lt;generationTime&gt;2026-03-18T10:00:00-03:00&lt;/generationTime&gt;&lt;expirationTime&gt;2026-03-18T22:00:00-03:00&lt;/expirationTime&gt;&lt;/header&gt;&lt;credentials&gt;&lt;token&gt;token&lt;/token&gt;&lt;sign&gt;sign&lt;/sign&gt;&lt;/credentials&gt;&lt;/loginTicketResponse&gt;</loginCmsReturn></loginCmsResponse></soapenv:Body></soapenv:Envelope>`
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/xml"}},
+				Body:       io.NopCloser(strings.NewReader(body)),
+				Request:    req,
+			}, nil
+		}),
+	}))
+
+	if _, err := client.Authenticate(context.Background(), cert, key, "wsfe", false); err != nil {
+		t.Fatalf("Authenticate returned error: %v", err)
+	}
+	if gotSOAPAction != "urn:LoginCms" {
+		t.Fatalf("expected SOAPAction urn:LoginCms, got %q", gotSOAPAction)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func generateTestCertificate(t *testing.T) (*x509.Certificate, *rsa.PrivateKey) {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject: pkix.Name{
+			CommonName:   "test",
+			SerialNumber: "CUIT 20123456789",
+		},
+		NotBefore: time.Now().Add(-time.Hour),
+		NotAfter:  time.Now().Add(time.Hour),
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cert, key
 }
 
 func TestTokenAcceso_IsExpired(t *testing.T) {
