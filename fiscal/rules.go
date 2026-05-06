@@ -3,7 +3,7 @@ package fiscal
 import (
 	"fmt"
 
-	afipkit "github.com/lukcba-developers/go-afip-kit"
+	afipkit "github.com/JoaquinTavella/go-afip-kit"
 )
 
 // DeterminarTipoComprobante returns the comprobante type code based on

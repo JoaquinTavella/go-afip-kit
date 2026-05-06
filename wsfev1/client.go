@@ -7,9 +7,9 @@ import (
 	"encoding/xml"
 	"fmt"
 
-	afipkit "github.com/lukcba-developers/go-afip-kit"
-	"github.com/lukcba-developers/go-afip-kit/soap"
-	"github.com/lukcba-developers/go-afip-kit/wsaa"
+	afipkit "github.com/JoaquinTavella/go-afip-kit"
+	"github.com/JoaquinTavella/go-afip-kit/soap"
+	"github.com/JoaquinTavella/go-afip-kit/wsaa"
 )
 
 const (
@@ -170,12 +170,12 @@ func (c *Client) SolicitarCAE(ctx context.Context, token *wsaa.TokenAcceso, cuit
 
 	det := result.FeDetResp[0]
 	caeResult := &CAEResult{
-		CAE:       det.CAE,
-		CAEFchVto: det.CAEFchVto,
-		CbteDesde: det.CbteDesde,
-		CbteHasta: det.CbteHasta,
-		Resultado: det.Resultado,
-		Reproceso: result.FeCabResp.Reproceso == "S",
+		CAE:           det.CAE,
+		CAEFchVto:     det.CAEFchVto,
+		CbteDesde:     det.CbteDesde,
+		CbteHasta:     det.CbteHasta,
+		Resultado:     det.Resultado,
+		Reproceso:     result.FeCabResp.Reproceso == "S",
 		Observaciones: obsToDetails(det.Observaciones),
 	}
 

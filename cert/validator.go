@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	afipkit "github.com/lukcba-developers/go-afip-kit"
+	afipkit "github.com/JoaquinTavella/go-afip-kit"
 )
 
 // cuitDigitsRegex matches exactly 11 digits.

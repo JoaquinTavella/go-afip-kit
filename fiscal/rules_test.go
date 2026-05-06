@@ -3,7 +3,7 @@ package fiscal
 import (
 	"testing"
 
-	afipkit "github.com/lukcba-developers/go-afip-kit"
+	afipkit "github.com/JoaquinTavella/go-afip-kit"
 )
 
 func TestDeterminarTipoComprobante(t *testing.T) {

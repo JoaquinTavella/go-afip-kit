@@ -11,8 +11,8 @@ import (
 	"fmt"
 	"time"
 
-	afipkit "github.com/lukcba-developers/go-afip-kit"
-	"github.com/lukcba-developers/go-afip-kit/soap"
+	afipkit "github.com/JoaquinTavella/go-afip-kit"
+	"github.com/JoaquinTavella/go-afip-kit/soap"
 )
 
 const (

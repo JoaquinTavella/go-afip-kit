@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	afipkit "github.com/lukcba-developers/go-afip-kit"
-	"github.com/lukcba-developers/go-afip-kit/soap"
-	"github.com/lukcba-developers/go-afip-kit/wsaa"
+	afipkit "github.com/JoaquinTavella/go-afip-kit"
+	"github.com/JoaquinTavella/go-afip-kit/soap"
+	"github.com/JoaquinTavella/go-afip-kit/wsaa"
 )
 
 const (

@@ -1,4 +1,4 @@
-module github.com/lukcba-developers/go-afip-kit
+module github.com/JoaquinTavella/go-afip-kit
 
 go 1.24.5
 

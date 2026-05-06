@@ -6,8 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/lukcba-developers/go-afip-kit/soap"
-	"github.com/lukcba-developers/go-afip-kit/wsaa"
+	"github.com/JoaquinTavella/go-afip-kit/soap"
+	"github.com/JoaquinTavella/go-afip-kit/wsaa"
 )
 
 func TestHealthCheck(t *testing.T) {
@@ -300,7 +300,7 @@ func TestPersona_Errores(t *testing.T) {
 			TipoPersona: "FISICA",
 			IDPersona:   20123456789,
 		},
-		ErrorConstancia: []errorItem{{Error: "Error en constancia"}},
+		ErrorConstancia:  []errorItem{{Error: "Error en constancia"}},
 		ErrorMonotributo: []errorItem{{Error: "Error en monotributo"}},
 	}
 
